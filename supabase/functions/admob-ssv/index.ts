@@ -47,14 +47,11 @@ Deno.serve(async (req: Request) => {
     if (!/^signature=[^&]+&key_id=[0-9]+$/.test(tail)) return new Response("Bad signature parameters", { status: 400 });
     const sigFields = new URLSearchParams(tail);
     const params = new URLSearchParams(signed);
-    for (const k of ["ad_unit", "reward_amount", "reward_item", "timestamp", "transaction_id", "custom_data"]) {
+    for (const k of ["ad_unit", "reward_amount", "reward_item", "timestamp", "transaction_id"]) {
       if (params.getAll(k).length !== 1) return new Response("Missing or duplicate field", { status: 400 });
     }
     if (params.get("ad_unit") !== EXPECTED_AD_UNIT || params.get("reward_amount") !== "10" || params.get("reward_item") !== "BoostCoins")
       return new Response("Unexpected reward", { status: 400 });
-    const userId = params.get("custom_data")!;
-    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(userId))
-      return new Response("Invalid user", { status: 400 });
     const transactionId = params.get("transaction_id")!;
     if (transactionId.length < 8 || transactionId.length > 256) return new Response("Invalid transaction", { status: 400 });
     const ts = Number(params.get("timestamp"));
@@ -69,6 +66,14 @@ Deno.serve(async (req: Request) => {
     const cryptoKey = await crypto.subtle.importKey("spki", decode64(pem), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
     const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, cryptoKey, derToRaw(decode64(sigFields.get("signature")!)), new TextEncoder().encode(signed));
     if (!ok) return new Response("Invalid signature", { status: 403 });
+    // La prueba firmada de AdMob puede no incluir un usuario.
+    // Nunca se conceden monedas sin un identificador válido.
+    if (!params.has("custom_data")) return new Response("OK", { status: 200 });
+    if (params.getAll("custom_data").length !== 1)
+      return new Response("Invalid user", { status: 400 });
+    const userId = params.get("custom_data")!;
+    if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(userId))
+      return new Response("Invalid user", { status: 400 });
     const base = Deno.env.get("SUPABASE_URL");
     const secret = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
     if (!base || !secret) throw Error("Missing server credentials");
