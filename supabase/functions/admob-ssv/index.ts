@@ -36,7 +36,12 @@ Deno.serve(async (req: Request) => {
     const raw = new URL(req.url).search.slice(1);
     const marker = "&signature=";
     const cut = raw.lastIndexOf(marker);
-    if (cut < 0) return new Response("Unsigned", { status: 400 });
+    if (cut < 0) {
+      const probe = new URLSearchParams(raw);
+      if (!probe.has("transaction_id") && !probe.has("signature") && !probe.has("key_id"))
+        return new Response("OK", { status: 200 });
+      return new Response("Unsigned", { status: 400 });
+    }
     const signed = raw.slice(0, cut);
     const tail = raw.slice(cut + 1);
     if (!/^signature=[^&]+&key_id=[0-9]+$/.test(tail)) return new Response("Bad signature parameters", { status: 400 });
