@@ -50,7 +50,7 @@ Deno.serve(async (req: Request) => {
     for (const k of ["ad_unit", "reward_amount", "reward_item", "timestamp", "transaction_id"]) {
       if (params.getAll(k).length !== 1) return new Response("Missing or duplicate field", { status: 400 });
     }
-    if (params.get("ad_unit") !== EXPECTED_AD_UNIT || params.get("reward_amount") !== "10" || params.get("reward_item") !== "BoostCoins")
+    if (![EXPECTED_AD_UNIT, "1234567890"].includes(params.get("ad_unit") ?? "") || params.get("reward_amount") !== "10" || params.get("reward_item") !== "BoostCoins")
       return new Response("Unexpected reward", { status: 400 });
     const transactionId = params.get("transaction_id")!;
     if (transactionId.length < 8 || transactionId.length > 256) return new Response("Invalid transaction", { status: 400 });
@@ -66,6 +66,9 @@ Deno.serve(async (req: Request) => {
     const cryptoKey = await crypto.subtle.importKey("spki", decode64(pem), { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"]);
     const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, cryptoKey, derToRaw(decode64(sigFields.get("signature")!)), new TextEncoder().encode(signed));
     if (!ok) return new Response("Invalid signature", { status: 403 });
+    // Prueba firmada de Google: nunca concede monedas.
+    if (params.get("ad_unit") === "1234567890")
+      return new Response("OK", { status: 200 });
     // La prueba firmada de AdMob puede no incluir un usuario.
     // Nunca se conceden monedas sin un identificador válido.
     if (!params.has("custom_data")) return new Response("OK", { status: 200 });

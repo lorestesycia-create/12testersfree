@@ -1,18 +1,34 @@
 workflows:
   android-debug:
-    name: 12TestersFree Android debug verification
+    name: Verificar Android
     max_build_duration: 60
     instance_type: linux_x2
     environment:
       java: 17
     scripts:
-      - name: Install Gradle 8.7
+      - name: Instalar Gradle
         script: |
-          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip
+          wget -q https://services.gradle.org/distributions/gradle-8.13-bin.zip -O /tmp/gradle.zip
           unzip -q /tmp/gradle.zip -d /tmp
-      - name: Validate and build debug APK
+      - name: Comprobar compilacion
         script: |
-          /tmp/gradle-8.7/bin/gradle --no-daemon :app:assembleDebug :app:lintDebug
+          /tmp/gradle-8.13/bin/gradle --no-daemon :app:assembleDebug :app:lintDebug
     artifacts:
       - app/build/outputs/apk/debug/*.apk
-      - app/build/reports/lint-results-debug.html
+
+  android-release:
+    name: Generar AAB
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      java: 17
+    scripts:
+      - name: Instalar Gradle
+        script: |
+          wget -q https://services.gradle.org/distributions/gradle-8.13-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+      - name: Compilar AAB
+        script: |
+          /tmp/gradle-8.13/bin/gradle --no-daemon :app:bundleRelease -PproductionAds=true
+    artifacts:
+      - app/build/outputs/bundle/release/*.aab
