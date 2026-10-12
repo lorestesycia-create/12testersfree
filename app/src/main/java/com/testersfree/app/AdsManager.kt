@@ -10,6 +10,8 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.gms.ads.rewarded.ServerSideVerificationOptions
+import com.google.android.gms.ads.FullScreenContentCallback
+import com.google.android.gms.ads.AdError
 import com.google.android.ump.ConsentForm
 import com.google.android.ump.ConsentInformation
 import com.google.android.ump.ConsentRequestParameters
@@ -19,30 +21,43 @@ import com.google.android.ump.UserMessagingPlatform
 class AdsManager(private val activity: Activity) {
     private val consent = UserMessagingPlatform.getConsentInformation(activity)
     private var initialized = false
+    private var initializing = false
+    private val readyCallbacks = mutableListOf<() -> Unit>()
     private var rewarded: RewardedAd? = null
     private var activeBanner: AdView? = null
     // During development use Google's official test units, never live ads.
     // Production IDs are retained here for the reviewed release configuration.
     private val productionBannerId = "ca-app-pub-8854680295966508/7017750709"
     private val productionRewardedId = "ca-app-pub-8854680295966508/3570380150"
-    private val bannerId = "ca-app-pub-3940256099942544/6300978111" // Test unit in all builds until production approval
-    private val rewardedId = "ca-app-pub-3940256099942544/5224354917" // Test unit in all builds until production approval
+    private val bannerId = if (BuildConfig.USE_TEST_ADS) "ca-app-pub-3940256099942544/6300978111" else productionBannerId
+    private val rewardedId = if (BuildConfig.USE_TEST_ADS) "ca-app-pub-3940256099942544/5224354917" else productionRewardedId
 
     fun initialize(onReady: () -> Unit) {
         consent.requestConsentInfoUpdate(activity, ConsentRequestParameters.Builder().build(), {
-            UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) {
+            if (consent.canRequestAds()) startAds(onReady)
+            else UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) {
                 if (consent.canRequestAds()) startAds(onReady)
             }
-            if (consent.canRequestAds()) startAds(onReady)
         }, {
             if (consent.canRequestAds()) startAds(onReady)
         })
     }
 
     private fun startAds(onReady: () -> Unit) {
-        if (initialized) return
-        initialized = true
-        MobileAds.initialize(activity) { activity.runOnUiThread { onReady(); loadRewarded() } }
+        if (initialized) { onReady(); return }
+        readyCallbacks.add(onReady)
+        if (initializing) return
+        initializing = true
+        MobileAds.initialize(activity) {
+            activity.runOnUiThread {
+                initialized = true
+                initializing = false
+                val callbacks = readyCallbacks.toList()
+                readyCallbacks.clear()
+                callbacks.forEach { it() }
+                loadRewarded()
+            }
+        }
     }
 
     fun attachBanner(container: LinearLayout) {
@@ -52,6 +67,7 @@ class AdsManager(private val activity: Activity) {
         activeBanner = banner
         banner.setAdSize(AdSize.BANNER)
         banner.adUnitId = bannerId
+        container.removeAllViews()
         container.addView(banner)
         banner.loadAd(AdRequest.Builder().build())
     }
@@ -71,13 +87,20 @@ class AdsManager(private val activity: Activity) {
     fun destroy() { activeBanner?.destroy(); activeBanner = null }
 
     fun showRewarded(userId: String, onViewed: () -> Unit, onUnavailable: () -> Unit) {
+        if (!initialized || !consent.canRequestAds() || userId.isBlank()) return onUnavailable()
         val ad = rewarded ?: return onUnavailable()
         rewarded = null
         ad.setServerSideVerificationOptions(ServerSideVerificationOptions.Builder().setCustomData(userId).build())
+        ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+            override fun onAdDismissedFullScreenContent() { loadRewarded() }
+            override fun onAdFailedToShowFullScreenContent(adError: AdError) {
+                onUnavailable()
+                loadRewarded()
+            }
+        }
         ad.show(activity) { _ ->
             // Local event is informative only: reward must come from verified AdMob SSV.
             onViewed()
         }
-        loadRewarded()
     }
 }

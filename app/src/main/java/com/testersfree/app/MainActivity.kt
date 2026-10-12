@@ -137,8 +137,12 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         api = SupabaseApi(this)
         ads = AdsManager(this)
-        ads.initialize { adsReady = true; showScreen(0) }
-        if (intent?.data?.scheme == "testersfree") handleAuth(intent.data!!) else showScreen(0)
+        ads.initialize {
+            adsReady = true
+            if (!isFinishing && !isDestroyed)
+                showScreen(if (api.isSignedIn()) 3 else 0)
+        }
+        if (intent?.data?.scheme == "testersfree") handleAuth(intent.data!!) else showScreen(if (api.isSignedIn()) 3 else 0)
     }
 
     override fun onDestroy() {
@@ -156,10 +160,13 @@ class MainActivity : Activity() {
         Thread {
             try {
                 api.completeGoogleLogin(uri)
-                runOnUiThread { showScreen(3) }
+                runOnUiThread {
+                    setIntent(Intent(this, MainActivity::class.java))
+                    showScreen(3)
+                }
             } catch (e: Exception) {
                 runOnUiThread {
-                    showScreen(3)
+                    showScreen(if (api.isSignedIn()) 3 else 0)
                     AlertDialog.Builder(this).setMessage(e.message ?: "Login error").setPositiveButton("OK", null).show()
                 }
             }

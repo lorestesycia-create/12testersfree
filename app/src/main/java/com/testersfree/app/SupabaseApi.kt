@@ -25,7 +25,15 @@ class SupabaseApi(context: Context) {
         } catch (_: Exception) { null }
     }
 
-    fun isSignedIn(): Boolean = !prefs.getString("access_token", null).isNullOrBlank()
+    fun isSignedIn(): Boolean {
+        val token = prefs.getString("access_token", null) ?: return false
+        return try {
+            val payload = token.split(".").getOrNull(1) ?: return false
+            val decoded = String(Base64.decode(payload, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP), Charsets.UTF_8)
+            val exp = JSONObject(decoded).optLong("exp", 0)
+            exp > System.currentTimeMillis() / 1000 || !prefs.getString("refresh_token", null).isNullOrBlank()
+        } catch (_: Exception) { false }
+    }
     fun saveSession(accessToken: String, refreshToken: String) {
         prefs.edit().putString("access_token", accessToken).putString("refresh_token", refreshToken).apply()
     }

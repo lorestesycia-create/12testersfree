@@ -12,7 +12,19 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
-    buildTypes { release { isMinifyEnabled = false } }
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+            buildConfigField("boolean", "USE_TEST_ADS", "true")
+        }
+        release {
+            isMinifyEnabled = false
+            // Explicitly opt into production ads only for a verified, signed release.
+            val productionAds = providers.gradleProperty("productionAds").orNull == "true"
+            buildConfigField("boolean", "USE_TEST_ADS", (!productionAds).toString())
+        }
+    }
+    buildFeatures { buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
