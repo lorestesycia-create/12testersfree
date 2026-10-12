@@ -1,0 +1,18 @@
+workflows:
+  android-debug:
+    name: 12TestersFree Android debug verification
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      java: 17
+    scripts:
+      - name: Install Gradle 8.7
+        script: |
+          wget -q https://services.gradle.org/distributions/gradle-8.7-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+      - name: Validate and build debug APK
+        script: |
+          /tmp/gradle-8.7/bin/gradle --no-daemon :app:assembleDebug :app:lintDebug
+    artifacts:
+      - app/build/outputs/apk/debug/*.apk
+      - app/build/reports/lint-results-debug.html
