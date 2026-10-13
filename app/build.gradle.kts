@@ -12,6 +12,14 @@ android {
         versionCode = 1
         versionName = "1.0.0"
     }
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("CM_KEYSTORE_PATH"))
+            storePassword = System.getenv("CM_KEYSTORE_PASSWORD")
+            keyAlias = System.getenv("CM_KEY_ALIAS")
+            keyPassword = System.getenv("CM_KEY_PASSWORD")
+        }
+    }
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -19,6 +27,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
             // Explicitly opt into production ads only for a verified, signed release.
             val productionAds = providers.gradleProperty("productionAds").orNull == "true"
             buildConfigField("boolean", "USE_TEST_ADS", (!productionAds).toString())
