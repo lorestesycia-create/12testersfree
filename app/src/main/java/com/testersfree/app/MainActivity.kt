@@ -879,63 +879,161 @@ class MainActivity : Activity() {
             2 -> {
                 body.addView(label(tr("Monedas", "Coins"), 23f, true))
                 loadRows(2)
-                if (api.isSignedIn()) {
-                    val rewardInfo = label(tr("Máximo 2 anuncios recompensados cada 4 horas.", "Maximum 2 rewarded ads every 4 hours."))
-                    body.addView(rewardInfo)
 
-                    val rewardButton = actionButton(tr("Consultando disponibilidad…", "Checking availability…")) {}
+                if (api.isSignedIn()) {
+                    body.addView(label(
+                        tr(
+                            "Máximo 2 anuncios recompensados cada 4 horas.",
+                            "Maximum 2 rewarded ads every 4 hours."
+                        ),
+                        17f,
+                        true
+                    ))
+
+                    val rewardButton = actionButton(
+                        tr("Consultando disponibilidad…", "Checking availability…")
+                    ) {}
                     rewardButton.isEnabled = false
                     body.addView(rewardButton)
 
-                    Thread {
-                        try {
-                            val state = api.rewardedAdStatus()
-                            val remaining = state.optInt("remaining", 0)
-                            runOnUiThread {
-                                if (!isFinishing) {
-                                    if (remaining <= 0) {
-                                        rewardButton.text = tr("Límite alcanzado · disponible más tarde", "Limit reached · available later")
-                                        rewardButton.isEnabled = false
-                                    } else {
-                                        rewardButton.text = tr("Ver anuncio · +10 monedas de impulso", "Watch ad · +10 boost coins")
-                                        rewardButton.isEnabled = true
-                                        rewardButton.setOnClickListener {
+                    fun refreshRewardStatus() {
+                        rewardButton.isEnabled = false
+                        rewardButton.text =
+                            tr("Consultando disponibilidad…", "Checking availability…")
+
+                        Thread {
+                            try {
+                                val state = api.rewardedAdStatus()
+                                val remaining = state.optInt("remaining", 0)
+
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        if (remaining <= 0) {
+                                            rewardButton.text = tr(
+                                                "Límite alcanzado · disponible más tarde",
+                                                "Limit reached · available later"
+                                            )
                                             rewardButton.isEnabled = false
-                                            val uid = api.currentUserId()
-                                            if (uid == null) {
-                                                rewardButton.isEnabled = true
-                                                Toast.makeText(this, tr("Inicia sesión", "Sign in first"), Toast.LENGTH_LONG).show()
-                                            } else {
-                                                ads.showRewarded(uid, {
-                                                    rewardButton.text = tr("Validando recompensa…", "Validating reward…")
-                                                    Toast.makeText(this, tr("Anuncio completado. Validando recompensa.", "Ad completed. Validating reward."), Toast.LENGTH_LONG).show()
-                                                    android.os.Handler(mainLooper).postDelayed({
-                                                        if (!isFinishing) showScreen(2)
-                                                    }, 4000)
-                                                }, {
-                                                    rewardButton.isEnabled = true
-                                                    Toast.makeText(this, tr("Anuncio no disponible", "Ad unavailable"), Toast.LENGTH_LONG).show()
-                                                })
+                                            rewardButton.setOnClickListener(null)
+                                        } else {
+                                            rewardButton.text = tr(
+                                                "Ver anuncio · +10 monedas de impulso",
+                                                "Watch ad · +10 boost coins"
+                                            )
+                                            rewardButton.isEnabled = true
+
+                                            rewardButton.setOnClickListener {
+                                                rewardButton.isEnabled = false
+
+                                                Thread {
+                                                    try {
+                                                        val check = api.rewardedAdStatus()
+                                                        val stillRemaining =
+                                                            check.optInt("remaining", 0)
+
+                                                        runOnUiThread {
+                                                            if (!isFinishing && !isDestroyed) {
+                                                                if (stillRemaining <= 0) {
+                                                                    rewardButton.text = tr(
+                                                                        "Límite alcanzado · disponible más tarde",
+                                                                        "Limit reached · available later"
+                                                                    )
+                                                                    rewardButton.isEnabled = false
+                                                                    rewardButton.setOnClickListener(null)
+                                                                } else {
+                                                                    val uid = api.currentUserId()
+
+                                                                    if (uid == null) {
+                                                                        rewardButton.isEnabled = true
+                                                                        Toast.makeText(
+                                                                            this,
+                                                                            tr("Inicia sesión", "Sign in first"),
+                                                                            Toast.LENGTH_LONG
+                                                                        ).show()
+                                                                    } else {
+                                                                        ads.showRewarded(
+                                                                            uid,
+                                                                            {
+                                                                                rewardButton.text = tr(
+                                                                                    "Validando recompensa…",
+                                                                                    "Validating reward…"
+                                                                                )
+                                                                                rewardButton.isEnabled = false
+
+                                                                                android.os.Handler(mainLooper)
+                                                                                    .postDelayed({
+                                                                                        if (!isFinishing && !isDestroyed) {
+                                                                                            refreshRewardStatus()
+                                                                                            showScreen(2)
+                                                                                        }
+                                                                                    }, 4000)
+                                                                            },
+                                                                            {
+                                                                                refreshRewardStatus()
+                                                                                Toast.makeText(
+                                                                                    this,
+                                                                                    tr(
+                                                                                        "Anuncio no disponible",
+                                                                                        "Ad unavailable"
+                                                                                    ),
+                                                                                    Toast.LENGTH_LONG
+                                                                                ).show()
+                                                                            }
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    } catch (_: Exception) {
+                                                        runOnUiThread {
+                                                            if (!isFinishing && !isDestroyed) {
+                                                                rewardButton.text = tr(
+                                                                    "No se pudo consultar el límite",
+                                                                    "Could not check limit"
+                                                                )
+                                                                rewardButton.isEnabled = false
+                                                            }
+                                                        }
+                                                    }
+                                                }.start()
                                             }
                                         }
                                     }
                                 }
-                            }
-                        } catch (e: Exception) {
-                            runOnUiThread {
-                                if (!isFinishing) {
-                                    rewardButton.text = tr("No se pudo consultar el límite", "Could not check limit")
-                                    rewardButton.isEnabled = false
+                            } catch (_: Exception) {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        rewardButton.text = tr(
+                                            "No se pudo consultar el límite",
+                                            "Could not check limit"
+                                        )
+                                        rewardButton.isEnabled = false
+                                    }
                                 }
                             }
-                        }
-                    }.start()
+                        }.start()
+                    }
+
+                    refreshRewardStatus()
                 }
-                body.addView(label(tr("Las recompensas necesitan verificación segura del servidor.", "Rewards require secure server verification.")))
+
+                body.addView(label(tr(
+                    "Las recompensas necesitan verificación segura del servidor.",
+                    "Rewards require secure server verification."
+                )))
+
                 if (api.isSignedIn()) {
-                    body.addView(actionButton(tr("Consultar mis pruebas", "Check my tests")) { showSubmissions() })
-                    body.addView(actionButton(tr("Movimientos de monedas", "Coin transactions")) { showCoinHistory() })
-                    body.addView(actionButton(tr("Comentarios recibidos", "Received feedback")) { showReceivedFeedback() })
+                    body.addView(actionButton(
+                        tr("Consultar mis pruebas", "Check my tests")
+                    ) { showSubmissions() })
+
+                    body.addView(actionButton(
+                        tr("Movimientos de monedas", "Coin transactions")
+                    ) { showCoinHistory() })
+
+                    body.addView(actionButton(
+                        tr("Comentarios recibidos", "Received feedback")
+                    ) { showReceivedFeedback() })
                 }
             }
             else -> {
