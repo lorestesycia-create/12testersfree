@@ -124,6 +124,9 @@ class SupabaseApi(context: Context) {
     fun rpc(name: String, args: JSONObject = JSONObject()): String = request("/rest/v1/rpc/$name", "POST", args)
     fun tests(search: String = ""): JSONArray = JSONArray(rpc("available_tests", JSONObject().put("p_search", search)))
     fun library(): JSONArray = JSONArray(rpc("my_library"))
+    fun appTesterCount(appId: String): Int =
+        rpc("app_tester_count", JSONObject().put("p_app_id", appId))
+            .trim().trim('"').toIntOrNull() ?: 0
     fun submissions(): JSONArray = JSONArray(rpc("my_test_submissions"))
     fun receivedFeedback(): JSONArray = JSONArray(rpc("my_received_feedback"))
     fun coinHistory(): JSONArray = JSONArray(rpc("my_coin_history"))

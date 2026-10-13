@@ -688,6 +688,26 @@ class MainActivity : Activity() {
                         if (page == 1) {
                             target.addView(actionButton(tr("Editar aplicación", "Edit app")) { editAppDialog(item) })
                             val appId = item.optString("app_id")
+
+                            val testerCountView = label(tr("👥 Testers: consultando…", "👥 Testers: checking…"), 15f, true)
+                            target.addView(testerCountView)
+                            Thread {
+                                try {
+                                    val count = api.appTesterCount(appId)
+                                    runOnUiThread {
+                                        if (!isFinishing && generation == screenGeneration && target === body) {
+                                            testerCountView.text = "👥 Testers: $count"
+                                        }
+                                    }
+                                } catch (_: Exception) {
+                                    runOnUiThread {
+                                        if (!isFinishing && generation == screenGeneration && target === body) {
+                                            testerCountView.text = "👥 Testers: 0"
+                                        }
+                                    }
+                                }
+                            }.start()
+
                             val activeId = item.optString("active_listing_id").takeUnless { it == "null" || it.isBlank() }
                             if (activeId == null) {
                                 target.addView(actionButton(tr("Publicar · 60 monedas", "Publish · 60 coins")) {
@@ -843,6 +863,88 @@ class MainActivity : Activity() {
 
     private fun showSearchResults(search: String) {
         showScreen(0, search)
+    }
+
+    private fun showTutorial() {
+        screenGeneration++
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.rgb(246, 250, 254))
+            setPadding(22, 30, 22, 16)
+        }
+
+        root.addView(label("12TestersFree", 28f, true).apply { setTextColor(blue) })
+
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        content.addView(label(tr("Cómo funciona / Tutorial", "How it works / Tutorial"), 23f, true))
+
+        content.addView(label(tr(
+            "1. Únete al grupo de testers",
+            "1. Join the tester group"
+        ), 19f, true))
+        content.addView(label(tr(
+            "Antes de publicar tu primera aplicación, únete a 12TestersFree Community. Esto permite participar en las pruebas de las aplicaciones.",
+            "Before publishing your first app, join 12TestersFree Community. This allows you to participate in app tests."
+        )))
+
+        content.addView(actionButton(tr(
+            "Unirme al grupo de testers",
+            "Join the tester group"
+        )) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://groups.google.com/g/12testersfree-community")))
+        })
+
+        content.addView(label(tr(
+            "2. Añade tu aplicación",
+            "2. Add your application"
+        ), 19f, true))
+        content.addView(label(tr(
+            "Ve a Mis apps, pulsa + Añadir aplicación e introduce el enlace de Google Play, el nombre y el icono.",
+            "Go to My apps, tap + Add app and enter the Google Play link, name and icon."
+        )))
+
+        content.addView(label(tr(
+            "3. Publica tu aplicación",
+            "3. Publish your application"
+        ), 19f, true))
+        content.addView(label(tr(
+            "Publicar cuesta 60 monedas y mantiene la aplicación disponible durante 72 horas para que otros usuarios puedan encontrarla en Probar.",
+            "Publishing costs 60 coins and keeps the app available for 72 hours so other users can find it in Test."
+        )))
+
+        content.addView(label(tr(
+            "4. Prueba aplicaciones de otros usuarios",
+            "4. Test other users' applications"
+        ), 19f, true))
+        content.addView(label(tr(
+            "En Probar, elige una aplicación y pulsa Probar aplicación. Una prueba válida recompensa con 20 monedas una sola vez por aplicación.",
+            "In Test, choose an app and tap Test application. A valid test rewards 20 coins once per application."
+        )))
+
+        content.addView(label(tr(
+            "5. Usa tus monedas",
+            "5. Use your coins"
+        ), 19f, true))
+        content.addView(label(tr(
+            "Las monedas normales sirven para publicar aplicaciones, desbloquear espacios permanentes e impulsar publicaciones. Las monedas boost sirven para impulsar publicaciones.",
+            "Regular coins are used to publish apps, unlock permanent slots and boost listings. Boost coins are used to boost listings."
+        )))
+
+        content.addView(actionButton(tr(
+            "Volver a Cuenta",
+            "Back to Account"
+        )) {
+            showScreen(3)
+        })
+
+        scroll.addView(content)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        setContentView(root)
     }
 
     private fun showScreen(page: Int, search: String = "") {
@@ -1066,6 +1168,9 @@ class MainActivity : Activity() {
                 })
                 body.addView(actionButton(tr("Política de privacidad", "Privacy policy")) {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://12testersfree-privacy.boomurl.me/")))
+                })
+                body.addView(actionButton(tr("Cómo funciona / Tutorial", "How it works / Tutorial")) {
+                    showTutorial()
                 })
                 body.addView(actionButton(tr("Unirme al grupo de testers", "Join the tester group")) {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://groups.google.com/g/12testersfree-community")))
