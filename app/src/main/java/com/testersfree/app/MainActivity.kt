@@ -14,6 +14,12 @@ import android.widget.Toast
 import android.os.Bundle
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.widget.ImageView
+import java.io.ByteArrayOutputStream
+import java.net.URL
+import java.util.UUID
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -28,6 +34,10 @@ class MainActivity : Activity() {
     private val testPrefs by lazy { getSharedPreferences("pending_test", MODE_PRIVATE) }
     private var testPromptShown = false
     private var screenGeneration = 0
+    private var selectedIconBytes: ByteArray? = null
+    private var selectedIconPreview: ImageView? = null
+    private var iconPickerCallback: (() -> Unit)? = null
+    private val ICON_PICK_REQUEST = 1201
 
     override fun onResume() {
         super.onResume()
@@ -174,6 +184,88 @@ class MainActivity : Activity() {
             } catch (e: Exception) {
                 runOnUiThread { AlertDialog.Builder(this).setMessage(e.message ?: "Error").setPositiveButton("OK", null).show() }
             }
+        }.start()
+    }
+
+    private fun packageFromPlayUrl(url: String): String? {
+        return try {
+            val uri = Uri.parse(url.trim())
+            if (uri.scheme != "https" || uri.host != "play.google.com") null
+            else uri.getQueryParameter("id")?.trim()?.takeIf {
+                it.matches(Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$"))
+            }
+        } catch (_: Exception) { null }
+    }
+
+    private fun prepareIcon(uri: Uri): ByteArray {
+        val bitmap = contentResolver.openInputStream(uri).use {
+            BitmapFactory.decodeStream(it)
+        } ?: throw IllegalStateException(tr("No se pudo leer el logo", "Could not read logo"))
+
+        val maxSide = 512
+        val ratio = minOf(
+            1f,
+            maxSide.toFloat() / maxOf(bitmap.width, bitmap.height).toFloat()
+        )
+        val width = maxOf(1, (bitmap.width * ratio).toInt())
+        val height = maxOf(1, (bitmap.height * ratio).toInt())
+        val scaled = if (width != bitmap.width || height != bitmap.height)
+            Bitmap.createScaledBitmap(bitmap, width, height, true)
+        else bitmap
+
+        val out = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.WEBP, 88, out)
+        val bytes = out.toByteArray()
+
+        if (scaled !== bitmap) scaled.recycle()
+        bitmap.recycle()
+
+        if (bytes.size > 1024 * 1024)
+            throw IllegalStateException(tr("El logo es demasiado grande", "Logo is too large"))
+
+        return bytes
+    }
+
+    private fun chooseIcon(callback: () -> Unit) {
+        iconPickerCallback = callback
+        startActivityForResult(
+            Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            },
+            ICON_PICK_REQUEST
+        )
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == ICON_PICK_REQUEST && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try {
+                selectedIconBytes = prepareIcon(uri)
+                selectedIconPreview?.setImageURI(uri)
+                iconPickerCallback?.invoke()
+            } catch (e: Exception) {
+                Toast.makeText(this, e.message ?: tr("Logo no válido", "Invalid logo"), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun loadIcon(path: String) {
+        if (path.isBlank() || path == "null") return
+        val image = ImageView(this).apply {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.CENTER_CROP
+        }
+        val size = (72 * resources.displayMetrics.density).toInt()
+        body.addView(image, LinearLayout.LayoutParams(size, size).apply {
+            bottomMargin = (8 * resources.displayMetrics.density).toInt()
+        })
+        Thread {
+            try {
+                val bitmap = URL(api.iconUrl(path)).openStream().use { BitmapFactory.decodeStream(it) }
+                runOnUiThread { if (!isFinishing) image.setImageBitmap(bitmap) }
+            } catch (_: Exception) {}
         }.start()
     }
 
@@ -344,29 +436,218 @@ class MainActivity : Activity() {
     }
 
     private fun addAppDialog() {
-        val fields = listOf("Package ID (com.example.app)", tr("Nombre", "Name"),
-            tr("Desarrollador", "Developer"), "Google Play URL", tr("Instrucciones", "Instructions"))
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 0, 24, 0) }
-        val inputs = fields.map { hint -> EditText(this).also { it.hint = hint; layout.addView(it) } }
-        AlertDialog.Builder(this).setTitle(tr("Añadir aplicación", "Add app")).setView(layout)
+        selectedIconBytes = null
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 0, 24, 0)
+        }
+
+        val url = EditText(this).apply {
+            hint = "Google Play URL"
+            setSingleLine(true)
+        }
+        val name = EditText(this).apply {
+            hint = tr("Nombre", "Name")
+            setSingleLine(true)
+        }
+        val preview = ImageView(this).apply {
+            adjustViewBounds = true
+            minimumHeight = (100 * resources.displayMetrics.density).toInt()
+        }
+        selectedIconPreview = preview
+
+        val logoButton = actionButton(tr("Seleccionar logo", "Select logo")) {
+            chooseIcon {
+                Toast.makeText(this, tr("Logo seleccionado", "Logo selected"), Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        layout.addView(url)
+        layout.addView(name)
+        layout.addView(preview)
+        layout.addView(logoButton)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Añadir aplicación", "Add app"))
+            .setView(layout)
             .setNegativeButton(tr("Cancelar", "Cancel"), null)
-            .setPositiveButton(tr("Guardar", "Save")) { _, _ ->
-                call({ api.addApp(inputs[0].text.toString(), inputs[1].text.toString(),
-                    inputs[2].text.toString(), inputs[3].text.toString(), inputs[4].text.toString()) })
-            }.show()
+            .setPositiveButton(tr("Guardar", "Save"), null)
+            .create()
+
+        dialog.setOnDismissListener {
+            selectedIconPreview = null
+            iconPickerCallback = null
+        }
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val playUrl = url.text.toString().trim()
+                val appName = name.text.toString().trim()
+                val pkg = packageFromPlayUrl(playUrl)
+                val icon = selectedIconBytes
+
+                if (pkg == null) {
+                    url.error = tr("URL de Google Play no válida", "Invalid Google Play URL")
+                    return@setOnClickListener
+                }
+                if (appName.isBlank()) {
+                    name.error = tr("Introduce el nombre", "Enter the name")
+                    return@setOnClickListener
+                }
+                if (icon == null) {
+                    Toast.makeText(this, tr("Selecciona el logo de la aplicación", "Select the app logo"), Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+
+                val save = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                save.isEnabled = false
+
+                Thread {
+                    try {
+                        val uid = api.currentUserId() ?: throw IllegalStateException(tr("Inicia sesión", "Sign in first"))
+                        val iconPath = "$uid/${UUID.randomUUID()}.webp"
+                        api.uploadIcon(iconPath, icon)
+                        api.addApp(pkg, appName, playUrl, iconPath)
+
+                        runOnUiThread {
+                            dialog.dismiss()
+                            showScreen(1)
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            save.isEnabled = true
+                            AlertDialog.Builder(this).setMessage(e.message ?: "Error").setPositiveButton("OK", null).show()
+                        }
+                    }
+                }.start()
+            }
+        }
+
+        dialog.show()
     }
 
     private fun editAppDialog(item: org.json.JSONObject) {
         val active = !item.optString("active_listing_id").let { it == "null" || it.isBlank() }
-        val fields = listOf(tr("Nombre", "Name"), tr("Desarrollador", "Developer"), "Google Play URL", tr("Instrucciones", "Instructions"))
-        val values = listOf(item.optString("app_name"), item.optString("developer_name"), item.optString("play_test_url"), item.optString("instructions"))
-        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 0, 24, 0) }
-        val inputs = fields.mapIndexed { i, hint -> EditText(this).also { it.hint = hint; it.setText(values[i]); it.isEnabled = !active || i == 3; layout.addView(it) } }
-        AlertDialog.Builder(this).setTitle(tr("Editar aplicación", "Edit app")).setView(layout)
+        selectedIconBytes = null
+
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 0, 24, 0)
+        }
+
+        val name = EditText(this).apply {
+            hint = tr("Nombre", "Name")
+            setText(item.optString("app_name"))
+            setSingleLine(true)
+            isEnabled = !active
+        }
+        val url = EditText(this).apply {
+            hint = "Google Play URL"
+            setText(item.optString("play_test_url"))
+            setSingleLine(true)
+            isEnabled = !active
+        }
+        val preview = ImageView(this).apply {
+            adjustViewBounds = true
+            minimumHeight = (100 * resources.displayMetrics.density).toInt()
+        }
+        selectedIconPreview = preview
+
+        val currentIcon = item.optString("icon_path")
+
+        val logoButton = actionButton(tr("Cambiar logo", "Change logo")) {
+            chooseIcon {
+                Toast.makeText(this, tr("Nuevo logo seleccionado", "New logo selected"), Toast.LENGTH_SHORT).show()
+            }
+        }.apply { isEnabled = !active }
+
+        layout.addView(name)
+        layout.addView(url)
+        layout.addView(preview)
+        layout.addView(logoButton)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(tr("Editar aplicación", "Edit app"))
+            .setView(layout)
             .setNegativeButton(tr("Cancelar", "Cancel"), null)
-            .setPositiveButton(tr("Guardar", "Save")) { _, _ ->
-                call({ api.editApp(item.getString("app_id"), inputs[0].text.toString(), inputs[1].text.toString(), inputs[2].text.toString(), inputs[3].text.toString()) })
-            }.show()
+            .setPositiveButton(tr("Guardar", "Save"), null)
+            .create()
+
+        dialog.setOnDismissListener {
+            selectedIconPreview = null
+            iconPickerCallback = null
+        }
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                isEnabled = !active
+                setOnClickListener {
+                    val appName = name.text.toString().trim()
+                    val playUrl = url.text.toString().trim()
+                    val pkg = packageFromPlayUrl(playUrl)
+
+                    if (pkg == null) {
+                        url.error = tr("URL de Google Play no válida", "Invalid Google Play URL")
+                        return@setOnClickListener
+                    }
+                    if (appName.isBlank()) {
+                        name.error = tr("Introduce el nombre", "Enter the name")
+                        return@setOnClickListener
+                    }
+
+                    isEnabled = false
+
+                    Thread {
+                        try {
+                            var iconPath = currentIcon
+                            selectedIconBytes?.let { bytes ->
+                                val uid = api.currentUserId() ?: throw IllegalStateException(tr("Inicia sesión", "Sign in first"))
+                                iconPath = "$uid/${UUID.randomUUID()}.webp"
+                                api.uploadIcon(iconPath, bytes)
+                            }
+
+                            if (iconPath.isBlank() || iconPath == "null")
+                                throw IllegalStateException(tr("Selecciona un logo", "Select a logo"))
+
+                            api.editApp(item.getString("app_id"), appName, playUrl, iconPath)
+
+                            runOnUiThread {
+                                dialog.dismiss()
+                                showScreen(1)
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                isEnabled = true
+                                AlertDialog.Builder(this@MainActivity).setMessage(e.message ?: "Error").setPositiveButton("OK", null).show()
+                            }
+                        }
+                    }.start()
+                }
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun loadLibraryUsage(view: TextView) {
+        Thread {
+            try {
+                val apps = api.library()
+                val profile = api.profile()
+                val slots = if (profile.length() > 0) profile.getJSONObject(0).optInt("library_slots", 2) else 2
+                val used = apps.length()
+                runOnUiThread {
+                    if (!isFinishing)
+                        view.text = tr("Espacios: $used/$slots utilizados", "Slots: $used/$slots used")
+                }
+            } catch (_: Exception) {
+                runOnUiThread {
+                    if (!isFinishing)
+                        view.text = tr("Espacios: no disponibles", "Slots: unavailable")
+                }
+            }
+        }.start()
     }
 
     private fun loadRows(page: Int, search: String = "") {
@@ -388,14 +669,13 @@ class MainActivity : Activity() {
                     for (i in 0 until rows.length()) {
                         val item = rows.getJSONObject(i)
                         val line = when(page) {
-                            0 -> item.optString("app_name") + " · " + item.optString("developer_name")
+                            0 -> item.optString("app_name")
                             1 -> item.optString("app_name") + " · " + item.optString("package_name")
                             else -> "${item.optInt("normal_coins")} monedas · ${item.optInt("boost_coins")} boost · ${item.optInt("library_slots")} espacios"
                         }
+                        if (page == 0 || page == 1) loadIcon(item.optString("icon_path"))
                         target.addView(label(line, 17f, true))
                         if (page == 0) {
-                            val instructions = item.optString("instructions").takeUnless { it.isBlank() || it == "null" }
-                            if (instructions != null) target.addView(label(tr("Instrucciones: ", "Instructions: ") + instructions, 14f))
                             val expiry = item.optString("expires_at")
                             if (expiry.isNotBlank()) target.addView(label(tr("Disponible hasta: ", "Available until: ") + expiry.take(16).replace('T', ' '), 13f))
                             val listingId = item.optString("listing_id")
@@ -576,7 +856,7 @@ class MainActivity : Activity() {
         when (page) {
             0 -> {
                 body.addView(label(tr("Encuentra aplicaciones para probar", "Discover apps to test"), 23f, true))
-                val searchInput = EditText(this).apply { hint = tr("Buscar aplicación o desarrollador", "Search app or developer"); setSingleLine(true); setText(search) }
+                val searchInput = EditText(this).apply { hint = tr("Buscar aplicación", "Search app"); setSingleLine(true); setText(search) }
                 body.addView(searchInput)
                 body.addView(actionButton(tr("Buscar", "Search")) { showSearchResults(searchInput.text.toString()) })
                 loadRows(0, search)
@@ -584,11 +864,11 @@ class MainActivity : Activity() {
             }
             1 -> {
                 body.addView(label(tr("Mi biblioteca", "My library"), 23f, true))
-                body.addView(label(tr("2 espacios gratuitos · Hasta 10 espacios", "2 free slots · Up to 10 slots")))
+                body.addView(label(tr("Espacios utilizados: consultando…", "Used slots: checking…")).also { libraryUsage -> loadLibraryUsage(libraryUsage) })
                 body.addView(label(tr("Publicar: 60 monedas · Duración: 72 horas", "Publish: 60 coins · Duration: 72 hours")))
                 if (api.isSignedIn()) {
                     body.addView(actionButton(tr("+ Añadir aplicación", "+ Add app")) { addAppDialog() })
-                    body.addView(actionButton(tr("Desbloquear espacio · 100 monedas", "Unlock slot · 100 coins")) {
+                    body.addView(actionButton(tr("Desbloquear 1 espacio para siempre · 100 monedas", "Unlock 1 slot forever · 100 coins")) {
                         confirm(tr("¿Comprar un espacio por 100 monedas?", "Buy a slot for 100 coins?")) {
                             call({ api.unlockSlot() })
                         }
@@ -600,19 +880,56 @@ class MainActivity : Activity() {
                 body.addView(label(tr("Monedas", "Coins"), 23f, true))
                 loadRows(2)
                 if (api.isSignedIn()) {
-                    body.addView(actionButton(tr("Ver anuncio · +10 monedas de impulso", "Watch ad · +10 boost coins")) {
-                        val uid = api.currentUserId()
-                        if (uid == null) {
-                            Toast.makeText(this, tr("Inicia sesión", "Sign in first"), Toast.LENGTH_LONG).show()
-                        } else {
-                            ads.showRewarded(uid, {
-                                Toast.makeText(this, tr("Anuncio completado. Recompensa pendiente de validación.", "Ad completed. Reward awaiting verification."), Toast.LENGTH_LONG).show()
-                            }, {
-                                Toast.makeText(this, tr("Anuncio no disponible", "Ad unavailable"), Toast.LENGTH_LONG).show()
-                            })
+                    val rewardInfo = label(tr("Máximo 2 anuncios recompensados cada 4 horas.", "Maximum 2 rewarded ads every 4 hours."))
+                    body.addView(rewardInfo)
+
+                    val rewardButton = actionButton(tr("Consultando disponibilidad…", "Checking availability…")) {}
+                    rewardButton.isEnabled = false
+                    body.addView(rewardButton)
+
+                    Thread {
+                        try {
+                            val state = api.rewardedAdStatus()
+                            val remaining = state.optInt("remaining", 0)
+                            runOnUiThread {
+                                if (!isFinishing) {
+                                    if (remaining <= 0) {
+                                        rewardButton.text = tr("Límite alcanzado · disponible más tarde", "Limit reached · available later")
+                                        rewardButton.isEnabled = false
+                                    } else {
+                                        rewardButton.text = tr("Ver anuncio · +10 monedas de impulso", "Watch ad · +10 boost coins")
+                                        rewardButton.isEnabled = true
+                                        rewardButton.setOnClickListener {
+                                            rewardButton.isEnabled = false
+                                            val uid = api.currentUserId()
+                                            if (uid == null) {
+                                                rewardButton.isEnabled = true
+                                                Toast.makeText(this, tr("Inicia sesión", "Sign in first"), Toast.LENGTH_LONG).show()
+                                            } else {
+                                                ads.showRewarded(uid, {
+                                                    rewardButton.text = tr("Validando recompensa…", "Validating reward…")
+                                                    Toast.makeText(this, tr("Anuncio completado. Validando recompensa.", "Ad completed. Validating reward."), Toast.LENGTH_LONG).show()
+                                                    android.os.Handler(mainLooper).postDelayed({
+                                                        if (!isFinishing) showScreen(2)
+                                                    }, 4000)
+                                                }, {
+                                                    rewardButton.isEnabled = true
+                                                    Toast.makeText(this, tr("Anuncio no disponible", "Ad unavailable"), Toast.LENGTH_LONG).show()
+                                                })
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                if (!isFinishing) {
+                                    rewardButton.text = tr("No se pudo consultar el límite", "Could not check limit")
+                                    rewardButton.isEnabled = false
+                                }
+                            }
                         }
-                    })
-                }
+                    }.start()
                 body.addView(label(tr("Las recompensas necesitan verificación segura del servidor.", "Rewards require secure server verification.")))
                 if (api.isSignedIn()) {
                     body.addView(actionButton(tr("Consultar mis pruebas", "Check my tests")) { showSubmissions() })

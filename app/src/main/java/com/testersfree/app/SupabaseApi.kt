@@ -137,8 +137,68 @@ class SupabaseApi(context: Context) {
     fun deleteApp(appId: String): String = rpc("delete_library_app", JSONObject().put("p_app_id", appId))
     fun unlockSlot(): String = rpc("unlock_library_slot")
     fun requestAccountDeletion(): String = rpc("request_account_deletion")
-    fun editApp(id: String, name: String, developer: String, url: String, instructions: String): String =
-        rpc("update_library_app", JSONObject().put("p_app_id", id).put("p_name", name).put("p_developer", developer).put("p_play_url", url).put("p_instructions", instructions))
-    fun addApp(packageName: String, name: String, developer: String, playUrl: String, instructions: String): String =
-        rpc("add_library_app", JSONObject().put("p_package", packageName).put("p_name", name).put("p_developer", developer).put("p_play_url", playUrl).put("p_instructions", instructions))
+
+    fun rewardedAdStatus(): JSONObject {
+        val rows = JSONArray(rpc("rewarded_ad_status"))
+        return if (rows.length() > 0) rows.getJSONObject(0)
+        else JSONObject().put("used", 0).put("remaining", 2)
+    }
+
+    fun iconUrl(path: String): String {
+        if (path.isBlank() || path == "null") return ""
+        return "$base/storage/v1/object/public/app-icons/$path"
+    }
+
+    fun uploadIcon(path: String, bytes: ByteArray): String {
+        fun upload(retry: Boolean): String {
+            val conn = URL("$base/storage/v1/object/app-icons/$path").openConnection() as HttpURLConnection
+            try {
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 12000
+                conn.readTimeout = 12000
+                conn.doOutput = true
+                conn.setRequestProperty("apikey", publicKey)
+                val token = prefs.getString("access_token", null)
+                    ?: throw IllegalStateException("Sign in required")
+                conn.setRequestProperty("Authorization", "Bearer $token")
+                conn.setRequestProperty("Content-Type", "image/webp")
+                conn.setRequestProperty("x-upsert", "false")
+                conn.outputStream.use { it.write(bytes) }
+
+                val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
+                val response = stream?.bufferedReader()?.use { it.readText() } ?: ""
+
+                if (conn.responseCode == 401 && retry && refreshSession())
+                    return upload(false)
+
+                if (conn.responseCode !in 200..299)
+                    throw IllegalStateException("HTTP ${conn.responseCode}: $response")
+
+                return path
+            } finally {
+                conn.disconnect()
+            }
+        }
+        return upload(true)
+    }
+
+    fun editApp(id: String, name: String, url: String, iconPath: String): String =
+        rpc(
+            "update_library_app",
+            JSONObject()
+                .put("p_app_id", id)
+                .put("p_name", name)
+                .put("p_play_url", url)
+                .put("p_icon_path", iconPath)
+        )
+
+    fun addApp(packageName: String, name: String, playUrl: String, iconPath: String): String =
+        rpc(
+            "add_library_app",
+            JSONObject()
+                .put("p_package", packageName)
+                .put("p_name", name)
+                .put("p_play_url", playUrl)
+                .put("p_icon_path", iconPath)
+        )
 }
