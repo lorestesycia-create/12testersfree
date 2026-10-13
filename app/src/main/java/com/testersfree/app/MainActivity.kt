@@ -142,7 +142,7 @@ class MainActivity : Activity() {
             if (!isFinishing && !isDestroyed)
                 showScreen(if (api.isSignedIn()) 3 else 0)
         }
-        if (intent?.data?.scheme == "testersfree") handleAuth(intent.data!!) else showScreen(if (api.isSignedIn()) 3 else 0)
+        showScreen(if (api.isSignedIn()) 3 else 0)
     }
 
     override fun onDestroy() {
@@ -150,28 +150,6 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        if (intent.data?.scheme == "testersfree") handleAuth(intent.data!!)
-    }
-
-    private fun handleAuth(uri: Uri) {
-        Thread {
-            try {
-                api.completeGoogleLogin(uri)
-                runOnUiThread {
-                    setIntent(Intent(this, MainActivity::class.java))
-                    showScreen(3)
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    showScreen(if (api.isSignedIn()) 3 else 0)
-                    AlertDialog.Builder(this).setMessage(e.message ?: "Login error").setPositiveButton("OK", null).show()
-                }
-            }
-        }.start()
-    }
 
     private fun label(text: String, size: Float = 17f, bold: Boolean = false): TextView = TextView(this).apply {
         this.text = text
@@ -203,6 +181,166 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this).setMessage(message)
             .setNegativeButton(tr("Cancelar", "Cancel"), null)
             .setPositiveButton(tr("Confirmar", "Confirm")) { _, _ -> action() }.show()
+    }
+
+    private fun authDialog(signUp: Boolean) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 8, 32, 0)
+        }
+
+        val email = EditText(this).apply {
+            hint = tr("Correo electrónico", "Email")
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            setSingleLine(true)
+        }
+
+        val password = EditText(this).apply {
+            hint = tr("Contraseña", "Password")
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+        }
+
+        layout.addView(email)
+        layout.addView(password)
+
+        val confirmPassword = if (signUp) {
+            EditText(this).apply {
+                hint = tr("Repite la contraseña", "Repeat password")
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                setSingleLine(true)
+                layout.addView(this)
+            }
+        } else null
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(
+                if (signUp)
+                    tr("Crear cuenta", "Create account")
+                else
+                    tr("Iniciar sesión", "Sign in")
+            )
+            .setView(layout)
+            .setNegativeButton(tr("Cancelar", "Cancel"), null)
+            .setPositiveButton(
+                if (signUp)
+                    tr("Crear cuenta", "Create account")
+                else
+                    tr("Entrar", "Sign in"),
+                null
+            )
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val mail = email.text.toString().trim()
+                val pass = password.text.toString()
+
+                if (mail.isBlank() || !android.util.Patterns.EMAIL_ADDRESS.matcher(mail).matches()) {
+                    email.error = tr("Introduce un correo válido", "Enter a valid email")
+                    return@setOnClickListener
+                }
+
+                if (pass.length < 6) {
+                    password.error = tr(
+                        "La contraseña debe tener al menos 6 caracteres",
+                        "Password must be at least 6 characters"
+                    )
+                    return@setOnClickListener
+                }
+
+                if (signUp && pass != confirmPassword?.text.toString()) {
+                    confirmPassword?.error = tr(
+                        "Las contraseñas no coinciden",
+                        "Passwords do not match"
+                    )
+                    return@setOnClickListener
+                }
+
+                val button = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                button.isEnabled = false
+
+                Thread {
+                    try {
+                        if (signUp) {
+                            val signedIn = api.signUp(mail, pass)
+
+                            runOnUiThread {
+                                if (signedIn) {
+                                    dialog.dismiss()
+                                    Toast.makeText(
+                                        this,
+                                        tr("Cuenta creada", "Account created"),
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    showScreen(3)
+                                } else {
+                                    dialog.dismiss()
+                                    AlertDialog.Builder(this)
+                                        .setMessage(
+                                            tr(
+                                                "Cuenta creada. Revisa tu correo y confirma tu dirección. Después inicia sesión.",
+                                                "Account created. Check your email and confirm your address, then sign in."
+                                            )
+                                        )
+                                        .setPositiveButton("OK", null)
+                                        .show()
+                                }
+                            }
+                        } else {
+                            api.signIn(mail, pass)
+
+                            runOnUiThread {
+                                dialog.dismiss()
+                                showScreen(3)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            button.isEnabled = true
+
+                            val raw = e.message ?: ""
+                            val message = when {
+                                raw.contains("Invalid login credentials", true) ->
+                                    tr(
+                                        "Correo o contraseña incorrectos.",
+                                        "Incorrect email or password."
+                                    )
+
+                                raw.contains("Email not confirmed", true) ->
+                                    tr(
+                                        "Confirma primero tu correo electrónico.",
+                                        "Confirm your email first."
+                                    )
+
+                                raw.contains("User already registered", true) ->
+                                    tr(
+                                        "Ya existe una cuenta con ese correo.",
+                                        "An account with that email already exists."
+                                    )
+
+                                else -> raw.ifBlank {
+                                    tr(
+                                        "No se pudo completar la operación.",
+                                        "Could not complete the operation."
+                                    )
+                                }
+                            }
+
+                            AlertDialog.Builder(this)
+                                .setMessage(message)
+                                .setPositiveButton("OK", null)
+                                .show()
+                        }
+                    }
+                }.start()
+            }
+        }
+
+        dialog.show()
     }
 
     private fun addAppDialog() {
@@ -500,8 +638,11 @@ class MainActivity : Activity() {
                         showScreen(3)
                     })
                 } else {
-                    body.addView(actionButton(tr("Entrar con Google", "Continue with Google")) {
-                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(api.googleLoginUrl())))
+                    body.addView(actionButton(tr("Iniciar sesión", "Sign in")) {
+                        authDialog(false)
+                    })
+                    body.addView(actionButton(tr("Crear cuenta", "Create account")) {
+                        authDialog(true)
                     })
                 }
                 body.addView(actionButton(tr("Opciones de privacidad de anuncios", "Ad privacy options")) {

@@ -1,10 +1,7 @@
 package com.testersfree.app
 
 import android.content.Context
-import android.net.Uri
 import android.util.Base64
-import java.security.MessageDigest
-import java.security.SecureRandom
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -39,29 +36,53 @@ class SupabaseApi(context: Context) {
     }
     fun signOut() { prefs.edit().clear().apply() }
 
-    // OAuth PKCE: verifier stays on device, only its SHA-256 challenge goes to the browser.
-    fun googleLoginUrl(): String {
-        val random = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        val verifier = Base64.encodeToString(random, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-        val challenge = Base64.encodeToString(MessageDigest.getInstance("SHA-256").digest(verifier.toByteArray()), Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP)
-        prefs.edit().putString("oauth_verifier", verifier).apply()
-        return Uri.parse("$base/auth/v1/authorize").buildUpon()
-            .appendQueryParameter("provider", "google")
-            .appendQueryParameter("redirect_to", "testersfree://auth/callback")
-            .appendQueryParameter("code_challenge", challenge)
-            .appendQueryParameter("code_challenge_method", "s256")
-            .build().toString()
+    fun signUp(email: String, password: String): Boolean {
+        val payload = JSONObject()
+            .put("email", email.trim())
+            .put("password", password)
+
+        val response = JSONObject(
+            request(
+                "/auth/v1/signup",
+                "POST",
+                payload,
+                authenticated = false
+            )
+        )
+
+        val access = response.optString("access_token")
+        val refresh = response.optString("refresh_token")
+
+        if (access.isNotBlank() && refresh.isNotBlank()) {
+            saveSession(access, refresh)
+            return true
+        }
+
+        return false
     }
 
-    fun completeGoogleLogin(callback: Uri) {
-        if (callback.scheme != "testersfree" || callback.host != "auth" || callback.path != "/callback")
-            throw IllegalArgumentException("Invalid login callback")
-        val code = callback.getQueryParameter("code") ?: throw IllegalArgumentException(callback.getQueryParameter("error_description") ?: "Missing authorization code")
-        val verifier = prefs.getString("oauth_verifier", null) ?: throw IllegalStateException("Login was not started on this device")
-        val payload = JSONObject().put("auth_code", code).put("code_verifier", verifier)
-        val response = JSONObject(request("/auth/v1/token?grant_type=pkce", "POST", payload, authenticated = false))
-        saveSession(response.getString("access_token"), response.getString("refresh_token"))
-        prefs.edit().remove("oauth_verifier").apply()
+    fun signIn(email: String, password: String) {
+        val payload = JSONObject()
+            .put("email", email.trim())
+            .put("password", password)
+
+        val response = JSONObject(
+            request(
+                "/auth/v1/token?grant_type=password",
+                "POST",
+                payload,
+                authenticated = false
+            )
+        )
+
+        val access = response.optString("access_token")
+        val refresh = response.optString("refresh_token")
+
+        if (access.isBlank() || refresh.isBlank()) {
+            throw IllegalStateException("Invalid login response")
+        }
+
+        saveSession(access, refresh)
     }
 
     private fun refreshSession(): Boolean {
