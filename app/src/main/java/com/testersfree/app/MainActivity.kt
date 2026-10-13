@@ -651,7 +651,9 @@ class MainActivity : Activity() {
                 body.addView(actionButton(tr("Política de privacidad", "Privacy policy")) {
                     startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://12testersfree-privacy.boomurl.me/")))
                 })
-                body.addView(label(tr("Grupo de testers: enlace pendiente.", "Tester group: link pending.")))
+                body.addView(actionButton(tr("Unirme al grupo de testers", "Join the tester group")) {
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://groups.google.com/g/12testersfree-community")))
+                })
             }
         }
         val nav = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
