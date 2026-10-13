@@ -930,6 +930,7 @@ class MainActivity : Activity() {
                             }
                         }
                     }.start()
+                }
                 body.addView(label(tr("Las recompensas necesitan verificación segura del servidor.", "Rewards require secure server verification.")))
                 if (api.isSignedIn()) {
                     body.addView(actionButton(tr("Consultar mis pruebas", "Check my tests")) { showSubmissions() })
