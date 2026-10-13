@@ -2,7 +2,7 @@ workflows:
   android-debug:
     name: Verificar Android
     max_build_duration: 60
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     environment:
       java: 17
     scripts:
@@ -19,7 +19,7 @@ workflows:
   android-release:
     name: Generar AAB
     max_build_duration: 60
-    instance_type: linux_x2
+    instance_type: mac_mini_m2
     environment:
       java: 17
       android_signing:
